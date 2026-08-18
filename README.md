@@ -1,5 +1,7 @@
 # SignalRGB WIZ Network Plugin
-This plugin adds a new network Interface to your SignalRGB Network Tab.
+[![Add To Installation](https://marketplace.signalrgb.com/resources/add-extension-256.png 'Add to My SignalRGB Installation')](signalrgb://addon/install?url=https://github.com/GreenSky-Productions/SignalRGB-WIZ-Network-Plugin)
+
+This plugin adds a new network Interface to your SignalRGB device Tab.
 You need to activate the feature for local network communication inside your WIZ App
 
 * It will start automatically to search for devices inside your home network.
