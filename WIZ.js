@@ -69,6 +69,7 @@ export function onvariableLedCountChanged(){
 
 
 export function Initialize(){
+	device.addFeature("udp");
 	device.setName(`WIZ ${controller.modelName} Room: ${controller.roomId}`);
 	if(controller.wiztype){
 		//device.setIcon(controller.wiztype.imageUrl);
