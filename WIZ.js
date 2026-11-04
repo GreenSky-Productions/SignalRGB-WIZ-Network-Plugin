@@ -184,10 +184,6 @@ export function DiscoveryService() {
     }
 };
 
-    service.broadcast(request, "192.168.0.237");
-
-    };
-
 	this.Update = function(){
 		
 		for(const cont of service.controllers){
