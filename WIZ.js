@@ -152,8 +152,8 @@ export function DiscoveryService() {
 	this.firstRun = true;
 	this.IconUrl = "https://play-lh.googleusercontent.com/jhmzIodqBLQQUD2sJF_O6oawa04ocDFfQIgoH0rPOXQY3V1uVz0-FJvEieFjVO-kcJ8=w200-h200-rw";
 	this.UdpBroadcastPort = 38899;
-	this.UdpBroadcastAddress = "255.255.255.255"; //"239.255.255.250";
-	this.UdpListenPort = 38900;
+	this.UdpBroadcastAddress = "192.168.0.255"; //"239.255.255.250";
+	this.UdpListenPort = 38899;
 
 	this.CheckForDevices = function(){
 		service.log("Broadcasting device scan...");
