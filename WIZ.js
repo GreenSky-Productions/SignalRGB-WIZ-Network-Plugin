@@ -81,6 +81,7 @@ let wizDiscoverySocket = null;
 let wizRegistrationVerified = false;
 let wizSystemConfigRequested = false;
 let wizDeviceInfo = null;
+let wizOneShotTestSent = false;
 
 // Temporary single-device test configuration.
 const WIZ_PROBE_IP = "192.168.0.237";
@@ -88,8 +89,10 @@ const WIZ_DEVICE_PORT = 38899;
 const WIZ_LOCAL_PORT = 38900;
 const WIZ_EXPECTED_MAC = "9877d5fbb8f4";
 
-// This test registers the device in SignalRGB but does not send lighting commands.
-const WIZ_LIGHTING_ENABLED = false;
+// Single low-brightness test command: sent once when the device component initializes.
+// Render remains disabled, so no continuous lighting stream is sent.
+const WIZ_ONE_SHOT_TEST_ENABLED = true;
+const WIZ_TEST_COLOR = { r: 255, g: 0, b: 0, dimming: 10, speed: 100 };
 
 export function onvariableLedCountChanged() {
 }
@@ -134,16 +137,38 @@ export function Initialize() {
     device.log(controller.ip);
     device.log(controller.port);
 
-    if (!WIZ_LIGHTING_ENABLED) {
-        device.log("[WIZ] Lighting output is intentionally disabled for this registration test.");
+    if (WIZ_ONE_SHOT_TEST_ENABLED && !wizOneShotTestSent) {
+        if (!wizDiscoverySocket || !wizRegistrationVerified || !wizDeviceInfo) {
+            device.log("[WIZ] One-shot test not sent: verified discovery socket/configuration unavailable.");
+        } else {
+            const testPacket = JSON.stringify({
+                method: "setPilot",
+                params: {
+                    r: WIZ_TEST_COLOR.r,
+                    g: WIZ_TEST_COLOR.g,
+                    b: WIZ_TEST_COLOR.b,
+                    dimming: WIZ_TEST_COLOR.dimming,
+                    speed: WIZ_TEST_COLOR.speed
+                }
+            });
+
+            try {
+                wizDiscoverySocket.write(
+                    testPacket,
+                    controller.ip,
+                    controller.port
+                );
+                wizOneShotTestSent = true;
+                device.log("[WIZ] One-shot setPilot command sent: red at 10% dimming.");
+            } catch (err) {
+                device.log("[WIZ] One-shot setPilot transmission failed: " + String(err));
+            }
+        }
     }
 }
 
 export function Render() {
-    // Deliberately do not send setPilot packets during controller-registration testing.
-    if (!WIZ_LIGHTING_ENABLED) {
-        return;
-    }
+    // Intentionally empty: this test sends exactly one command from Initialize().
 }
 
 export function Shutdown(suspend) {
@@ -203,6 +228,7 @@ export function DiscoveryService() {
         wizRegistrationVerified = false;
         wizSystemConfigRequested = false;
         wizDeviceInfo = null;
+        wizOneShotTestSent = false;
         lastBroadcast = 0;
 
         if (wizDiscoverySocket) {
@@ -344,6 +370,15 @@ export function DiscoveryService() {
                     service.log("[WIZ] Region: " + String(result.rgn || "not reported"));
 
                     discoveryService.CreateController(message.address, message.port, result);
+                    return;
+                }
+
+                if (packet.method === "setPilot") {
+                    if (packet.result && packet.result.success === true) {
+                        service.log("[WIZ] Neo acknowledged setPilot successfully.");
+                    } else {
+                        service.log("[WIZ] Neo returned a setPilot response.");
+                    }
                     return;
                 }
 
