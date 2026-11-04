@@ -155,11 +155,23 @@ export function DiscoveryService() {
 	this.UdpBroadcastAddress = "192.168.0.255"; //"239.255.255.250";
 	this.UdpListenPort = 38899;
 
-	this.CheckForDevices = function(){
-		service.log("Broadcasting device scan...");
-		service.broadcast(JSON.stringify({"method":"registration","params":{"phoneMac":"AAAAAAAAAAAA","register":false,"phoneIp":"1.2.3.4","id":"1"}}));
-		
-	};
+	this.CheckForDevices = function() {
+
+    service.log("[WIZ] Sending direct registration request...");
+
+    const request = JSON.stringify({
+        "method": "registration",
+        "params": {
+            "phoneMac": "AAAAAAAAAAAA",
+            "register": false,
+            "phoneIp": "1.2.3.4",
+            "id": "1"
+        }
+    });
+
+    service.broadcast(request, "192.168.0.237");
+
+    };
 
 	this.Update = function(){
 		
