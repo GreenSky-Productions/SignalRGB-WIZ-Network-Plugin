@@ -11,9 +11,10 @@ export function DefaultPosition() { return [75, 70]; }
 export function DefaultScale() { return 10.0; }
 
 /* global
-controller:readonly
-TurnOffOnShutdown:readonly
-variableLedCount:readonly
+controller:readonly, service:readonly, device:readonly,
+AutoStartStream:readonly, forcedColor:readonly, forceColor:readonly,
+dimmColor:readonly, minBrightniss:readonly,
+TurnOffOnShutdown:readonly, variableLedCount:readonly
 */
 
 export function ControllableParameters() {
@@ -70,42 +71,169 @@ export function SubdeviceController() {
     return false;
 }
 
-let ledCount = 4;
-let ledNames = [];
-let ledPositions = [];
-let subdevices = [];
-let lastBroadcast = 0;
+export function onvariableLedCountChanged() {
+}
 
-// Discovery socket state.
-let wizDiscoverySocket = null;
-let wizRegistrationVerified = false;
-let wizSystemConfigRequested = false;
-let wizDeviceInfo = null;
+// ============================================================
+// CONFIGURATION
+// ============================================================
 
-// Device-component control socket state.
-// This socket is separate from the discovery socket.
-let wizControlSocket = null;
-let wizOneShotTestSent = false;
+// Single-device diagnostic target.
+// General network discovery is not implemented yet.
 
-// Temporary single-device test configuration.
 const WIZ_PROBE_IP = "192.168.0.237";
 const WIZ_DEVICE_PORT = 38899;
 const WIZ_LOCAL_PORT = 38900;
 const WIZ_CONTROL_LOCAL_PORT = 38901;
 const WIZ_EXPECTED_MAC = "9877d5fbb8f4";
 
-// One-shot low-brightness test.
-// Render remains disabled, so no continuous lighting stream is sent.
-const WIZ_ONE_SHOT_TEST_ENABLED = true;
-const WIZ_TEST_COLOR = {
-    r: 255,
-    g: 0,
-    b: 0,
-    dimming: 10,
-    speed: 100
-};
+// Initial conservative cap: maximum 10 setPilot packets per second.
+const WIZ_MIN_SEND_INTERVAL_MS = 100;
+const WIZ_COMMAND_SPEED = 100;
 
-export function onvariableLedCountChanged() {
+
+// ============================================================
+// SOCKET AND FRAME STATE
+// ============================================================
+
+// Discovery-service socket state.
+let wizDiscoverySocket = null;
+let wizRegistrationVerified = false;
+let wizSystemConfigRequested = false;
+let lastBroadcast = 0;
+
+// Device-component socket and frame state.
+let wizControlSocket = null;
+let wizLastSentFrame = null;
+let wizLastSendTime = 0;
+let wizControlAckLogged = false;
+let wizControlErrorLogged = false;
+let wizRenderStartLogged = false;
+
+
+// ============================================================
+// FRAME HELPERS
+// ============================================================
+
+function wizIsEnabled(value) {
+    return value === true || value === "true" || value === 1;
+}
+
+function wizClamp(value, min, max) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+        return min;
+    }
+
+    return Math.min(max, Math.max(min, Math.round(number)));
+}
+
+function wizMakeFrame(color, dimming) {
+    if (!Array.isArray(color) || color.length < 3) {
+        return null;
+    }
+
+    return {
+        r: wizClamp(color[0], 0, 255),
+        g: wizClamp(color[1], 0, 255),
+        b: wizClamp(color[2], 0, 255),
+        dimming: wizClamp(dimming, 0, 100),
+        speed: WIZ_COMMAND_SPEED
+    };
+}
+
+function wizFramesEqual(a, b) {
+    return !!a && !!b &&
+        a.r === b.r &&
+        a.g === b.g &&
+        a.b === b.b &&
+        a.dimming === b.dimming &&
+        a.speed === b.speed;
+}
+
+function wizGetCurrentFrame() {
+    const color = wizIsEnabled(forceColor)
+        ? device.createColorArray(forcedColor, 1, "Inline")
+        : device.color(0, 0);
+
+    if (!Array.isArray(color) || color.length < 3) {
+        return null;
+    }
+
+    const r = wizClamp(color[0], 0, 255);
+    const g = wizClamp(color[1], 0, 255);
+    const b = wizClamp(color[2], 0, 255);
+
+    // Preserve the original plugin's black-pixel behaviour.
+    // A black canvas pixel is represented by dimmColor at minBrightniss.
+    if (r === 0 && g === 0 && b === 0) {
+        return wizMakeFrame(
+            device.createColorArray(dimmColor, 1, "Inline"),
+            wizClamp(minBrightniss, 1, 100)
+        );
+    }
+
+    return wizMakeFrame(
+        [r, g, b],
+        wizClamp(device.Brightness, 0, 100)
+    );
+}
+
+function wizSendFrame(frame) {
+    if (!wizControlSocket) {
+        if (!wizControlErrorLogged) {
+            device.log(
+                "[WIZ] Cannot send frame: control socket is unavailable."
+            );
+            wizControlErrorLogged = true;
+        }
+
+        return false;
+    }
+
+    const packet = JSON.stringify({
+        method: "setPilot",
+        params: {
+            r: frame.r,
+            g: frame.g,
+            b: frame.b,
+            dimming: frame.dimming,
+            speed: frame.speed
+        }
+    });
+
+    try {
+        wizControlSocket.write(
+            packet,
+            controller.ip,
+            Number(controller.port)
+        );
+
+        wizLastSentFrame = {
+            r: frame.r,
+            g: frame.g,
+            b: frame.b,
+            dimming: frame.dimming,
+            speed: frame.speed
+        };
+
+        wizLastSendTime = Date.now();
+        wizControlErrorLogged = false;
+
+        return true;
+
+    } catch (err) {
+        if (!wizControlErrorLogged) {
+            device.log(
+                "[WIZ] setPilot transmission failed: " + String(err)
+            );
+
+            wizControlErrorLogged = true;
+        }
+
+        return false;
+    }
 }
 
 
@@ -120,11 +248,9 @@ export function Initialize() {
         ? controller.wiztype.productName
         : `WIZ ${controller.modelName}`;
 
-    device.setName(`${componentName} Room: ${controller.roomId}`);
-
-    if (controller.wiztype && controller.wiztype.imageUrl) {
-        // device.setIcon(controller.wiztype.imageUrl);
-    }
+    device.setName(
+        `${componentName} Room: ${controller.roomId}`
+    );
 
     device.addProperty({
         property: "variableLedCount",
@@ -141,182 +267,214 @@ export function Initialize() {
     }
 
     device.setSize(1, 1);
-    device.setControllableLeds(["LED 1"], [[0, 0]]);
+
+    device.setControllableLeds(
+        ["LED 1"],
+        [[0, 0]]
+    );
 
     device.log("[WIZ] Controller component initialized.");
     device.log(JSON.stringify(controller));
     device.log(controller.ip);
     device.log(controller.port);
 
-    // --------------------------------------------------------
-    // ONE-SHOT SETPILOT TEST
-    // --------------------------------------------------------
+    const mac = String(
+        controller.mac || controller.id || ""
+    ).toLowerCase();
 
-    if (WIZ_ONE_SHOT_TEST_ENABLED && !wizOneShotTestSent) {
-        const controllerMac = String(
-            controller.mac || controller.id || ""
-        ).toLowerCase();
+    if (mac !== WIZ_EXPECTED_MAC) {
+        device.log(
+            "[WIZ] Control socket refused: unexpected controller MAC."
+        );
+        return;
+    }
 
-        if (controllerMac !== WIZ_EXPECTED_MAC) {
-            device.log(
-                "[WIZ] One-shot test refused: controller MAC does not match the test device."
-            );
-            return;
-        }
+    if (
+        typeof controller.ip !== "string" ||
+        !Number.isFinite(Number(controller.port))
+    ) {
+        device.log(
+            "[WIZ] Control socket refused: invalid controller address."
+        );
+        return;
+    }
 
-        if (
-            typeof controller.ip !== "string" ||
-            !Number.isFinite(Number(controller.port))
-        ) {
-            device.log(
-                "[WIZ] One-shot test refused: controller network address is invalid."
-            );
-            return;
-        }
-
+    // Close any previous component socket.
+    if (wizControlSocket) {
         try {
-            if (!udp || typeof udp.createSocket !== "function") {
-                throw new Error(
-                    "UDP createSocket() unavailable in device component context"
-                );
-            }
-
-            // DiscoveryService and the device component run in separate contexts.
-            // Create a dedicated socket inside the device component.
-            wizControlSocket = udp.createSocket();
-
-            if (
-                !wizControlSocket ||
-                typeof wizControlSocket.on !== "function" ||
-                typeof wizControlSocket.bind !== "function" ||
-                typeof wizControlSocket.write !== "function" ||
-                typeof wizControlSocket.close !== "function"
-            ) {
-                throw new Error(
-                    "Required device-control UDP socket methods unavailable"
-                );
-            }
-
-            // Listen for a response from the Neo.
-            wizControlSocket.on("message", (message) => {
-                if (!message || typeof message !== "object") {
-                    device.log(
-                        "[WIZ] Ignored invalid control-socket response wrapper."
-                    );
-                    return;
-                }
-
-                if (
-                    message.address !== controller.ip ||
-                    Number(message.port) !== Number(controller.port)
-                ) {
-                    device.log(
-                        "[WIZ] Ignored response from an unexpected control-socket sender."
-                    );
-                    return;
-                }
-
-                const raw = message.data;
-
-                if (
-                    typeof raw !== "string" ||
-                    raw.length === 0 ||
-                    raw.length > 1024
-                ) {
-                    device.log(
-                        "[WIZ] Ignored invalid control-socket response payload."
-                    );
-                    return;
-                }
-
-                device.log("[WIZ] Control UDP response: " + raw);
-
-                try {
-                    const response = JSON.parse(raw);
-
-                    if (
-                        response &&
-                        response.method === "setPilot" &&
-                        response.result &&
-                        response.result.success === true
-                    ) {
-                        device.log(
-                            "[WIZ] Neo acknowledged setPilot successfully."
-                        );
-                    }
-                } catch (err) {
-                    device.log(
-                        "[WIZ] Control response was not valid JSON."
-                    );
-                }
-            });
-
-            // Socket errors.
-            wizControlSocket.on("error", (err) => {
-                device.log(
-                    "[WIZ] Control UDP socket error: " + String(err)
-                );
-            });
-
-            // Bind to a different local port from discovery.
-            wizControlSocket.bind(WIZ_CONTROL_LOCAL_PORT);
-
-            device.log(
-                "[WIZ] Bound device control socket to local port " +
-                WIZ_CONTROL_LOCAL_PORT
-            );
-
-            // Construct the one-shot red command.
-            const testPacket = JSON.stringify({
-                method: "setPilot",
-                params: {
-                    r: WIZ_TEST_COLOR.r,
-                    g: WIZ_TEST_COLOR.g,
-                    b: WIZ_TEST_COLOR.b,
-                    dimming: WIZ_TEST_COLOR.dimming,
-                    speed: WIZ_TEST_COLOR.speed
-                }
-            });
-
-            // Send directly to the verified controller address.
-            wizControlSocket.write(
-                testPacket,
-                controller.ip,
-                Number(controller.port)
-            );
-
-            wizOneShotTestSent = true;
-
-            device.log(
-                "[WIZ] One-shot setPilot datagram submitted: red at 10% dimming."
-            );
-
+            wizControlSocket.close();
         } catch (err) {
             device.log(
-                "[WIZ] One-shot setPilot setup/transmission failed: " +
+                "[WIZ] Previous control socket close warning: " +
                 String(err)
             );
+        }
 
-            if (wizControlSocket) {
-                try {
-                    wizControlSocket.close();
-                } catch (closeError) {
-                    device.log(
-                        "[WIZ] Control socket cleanup warning: " +
-                        String(closeError)
-                    );
-                }
+        wizControlSocket = null;
+    }
 
-                wizControlSocket = null;
+    // Reset frame state.
+    wizLastSentFrame = null;
+    wizLastSendTime = 0;
+    wizControlAckLogged = false;
+    wizControlErrorLogged = false;
+    wizRenderStartLogged = false;
+
+    try {
+        if (!udp || typeof udp.createSocket !== "function") {
+            throw new Error(
+                "UDP createSocket() unavailable in device component context"
+            );
+        }
+
+        wizControlSocket = udp.createSocket();
+
+        if (
+            !wizControlSocket ||
+            typeof wizControlSocket.on !== "function" ||
+            typeof wizControlSocket.bind !== "function" ||
+            typeof wizControlSocket.write !== "function" ||
+            typeof wizControlSocket.close !== "function"
+        ) {
+            throw new Error(
+                "Required device-control UDP socket methods unavailable"
+            );
+        }
+
+        // Receive and validate acknowledgements.
+        wizControlSocket.on("message", (message) => {
+            if (
+                !message ||
+                typeof message !== "object" ||
+                message.address !== controller.ip ||
+                Number(message.port) !== Number(controller.port)
+            ) {
+                return;
             }
+
+            const raw = message.data;
+
+            if (
+                typeof raw !== "string" ||
+                raw.length === 0 ||
+                raw.length > 1024
+            ) {
+                return;
+            }
+
+            let response;
+
+            try {
+                response = JSON.parse(raw);
+            } catch (err) {
+                return;
+            }
+
+            if (
+                response &&
+                response.method === "setPilot" &&
+                response.result &&
+                response.result.success === true &&
+                !wizControlAckLogged
+            ) {
+                device.log(
+                    "[WIZ] Neo acknowledged live setPilot updates."
+                );
+
+                wizControlAckLogged = true;
+            }
+        });
+
+        wizControlSocket.on("error", (err) => {
+            device.log(
+                "[WIZ] Control UDP socket error: " + String(err)
+            );
+        });
+
+        wizControlSocket.bind(WIZ_CONTROL_LOCAL_PORT);
+
+        device.log(
+            "[WIZ] Bound device control socket to local port " +
+            WIZ_CONTROL_LOCAL_PORT
+        );
+
+    } catch (err) {
+        device.log(
+            "[WIZ] Control socket initialization failed: " +
+            String(err)
+        );
+
+        if (wizControlSocket) {
+            try {
+                wizControlSocket.close();
+            } catch (closeError) {
+                device.log(
+                    "[WIZ] Control socket cleanup warning: " +
+                    String(closeError)
+                );
+            }
+
+            wizControlSocket = null;
         }
     }
 }
 
+
+// ============================================================
+// RENDER — CONTINUOUS FRAME HANDLING
+// ============================================================
+
 export function Render() {
-    // Intentionally empty.
-    // This test sends exactly one command from Initialize().
+    // Preserve the original user-facing stream enable setting.
+    if (!wizIsEnabled(AutoStartStream)) {
+        return;
+    }
+
+    if (!wizControlSocket) {
+        if (!wizControlErrorLogged) {
+            device.log(
+                "[WIZ] Streaming enabled, but the control socket is unavailable."
+            );
+
+            wizControlErrorLogged = true;
+        }
+
+        return;
+    }
+
+    if (!wizRenderStartLogged) {
+        device.log(
+            "[WIZ] Continuous frame streaming started."
+        );
+
+        wizRenderStartLogged = true;
+    }
+
+    // Read the current canvas colour and brightness.
+    const frame = wizGetCurrentFrame();
+
+    if (!frame) {
+        return;
+    }
+
+    // Suppress identical frames.
+    if (wizFramesEqual(frame, wizLastSentFrame)) {
+        return;
+    }
+
+    // Render runs faster than the initial send limit.
+    // Skip intermediate frames and sample the newest colour next time.
+    if (Date.now() - wizLastSendTime < WIZ_MIN_SEND_INTERVAL_MS) {
+        return;
+    }
+
+    wizSendFrame(frame);
 }
+
+
+// ============================================================
+// DEVICE SHUTDOWN
+// ============================================================
 
 export function Shutdown(suspend) {
     if (wizControlSocket) {
@@ -329,13 +487,19 @@ export function Shutdown(suspend) {
 
         } catch (err) {
             device.log(
-                "[WIZ] Device control socket shutdown warning: " +
+                "[WIZ] Control socket shutdown warning: " +
                 String(err)
             );
         }
 
         wizControlSocket = null;
     }
+
+    wizLastSentFrame = null;
+    wizLastSendTime = 0;
+    wizControlAckLogged = false;
+    wizControlErrorLogged = false;
+    wizRenderStartLogged = false;
 }
 
 
@@ -389,16 +553,11 @@ export function DiscoveryService() {
     this.IconUrl =
         "https://play-lh.googleusercontent.com/jhmjIodqBLQQUD2sJF_O6oawa04ocDFfQIgoH0rPOXQY3V1uVz0-FJvEieFjVO-kcJ8=w200-h200-rw";
 
-    // --------------------------------------------------------
-    // INITIALIZATION
-    // --------------------------------------------------------
-
     this.Initialize = function() {
         service.log("[WIZ] Initializing single UDP socket...");
 
         wizRegistrationVerified = false;
         wizSystemConfigRequested = false;
-        wizDeviceInfo = null;
         lastBroadcast = 0;
 
         if (wizDiscoverySocket) {
@@ -406,7 +565,8 @@ export function DiscoveryService() {
                 wizDiscoverySocket.close();
             } catch (err) {
                 service.log(
-                    "[WIZ] Previous socket close warning: " + String(err)
+                    "[WIZ] Previous socket close warning: " +
+                    String(err)
                 );
             }
 
@@ -427,27 +587,22 @@ export function DiscoveryService() {
                 typeof wizDiscoverySocket.write !== "function" ||
                 typeof wizDiscoverySocket.close !== "function"
             ) {
-                throw new Error("Required UDP socket methods unavailable");
+                throw new Error(
+                    "Required UDP socket methods unavailable"
+                );
             }
 
-            // Register callbacks before binding.
             wizDiscoverySocket.on("message", (message) => {
                 service.log("[WIZ] UDP message received.");
 
-                if (!message || typeof message !== "object") {
-                    service.log(
-                        "[WIZ] Invalid UDP message wrapper."
-                    );
-                    return;
-                }
-
-                // Verify source IP and port.
                 if (
+                    !message ||
+                    typeof message !== "object" ||
                     message.address !== WIZ_PROBE_IP ||
                     Number(message.port) !== WIZ_DEVICE_PORT
                 ) {
                     service.log(
-                        "[WIZ] Unexpected UDP sender ignored."
+                        "[WIZ] Invalid or unexpected UDP sender ignored."
                     );
                     return;
                 }
@@ -485,33 +640,24 @@ export function DiscoveryService() {
                     return;
                 }
 
-                // ------------------------------------------------
-                // REGISTRATION RESPONSE
-                // ------------------------------------------------
-
+                // Registration response.
                 if (packet.method === "registration") {
                     if (
                         !packet.result ||
-                        typeof packet.result !== "object"
+                        typeof packet.result !== "object" ||
+                        packet.result.success !== true
                     ) {
                         service.log(
-                            "[WIZ] Missing registration result."
+                            "[WIZ] Registration response unsuccessful or malformed."
                         );
                         return;
                     }
 
-                    if (packet.result.success !== true) {
-                        service.log(
-                            "[WIZ] Registration unsuccessful."
-                        );
-                        return;
-                    }
-
-                    const receivedMac = String(
+                    const mac = String(
                         packet.result.mac || ""
                     ).toLowerCase();
 
-                    if (receivedMac !== WIZ_EXPECTED_MAC) {
+                    if (mac !== WIZ_EXPECTED_MAC) {
                         service.log(
                             "[WIZ] Registration MAC mismatch."
                         );
@@ -530,7 +676,7 @@ export function DiscoveryService() {
                         );
 
                         service.log(
-                            "[WIZ] MAC: " + receivedMac
+                            "[WIZ] MAC: " + mac
                         );
 
                         service.log(
@@ -538,16 +684,15 @@ export function DiscoveryService() {
                         );
                     }
 
-                    // Request system configuration once.
                     if (!wizSystemConfigRequested) {
-                        const configRequest = JSON.stringify({
+                        const request = JSON.stringify({
                             method: "getSystemConfig",
                             id: 1
                         });
 
                         try {
                             wizDiscoverySocket.write(
-                                configRequest,
+                                request,
                                 WIZ_PROBE_IP,
                                 WIZ_DEVICE_PORT
                             );
@@ -569,10 +714,7 @@ export function DiscoveryService() {
                     return;
                 }
 
-                // ------------------------------------------------
-                // SYSTEM CONFIGURATION RESPONSE
-                // ------------------------------------------------
-
+                // System configuration response.
                 if (packet.method === "getSystemConfig") {
                     if (
                         !packet.result ||
@@ -586,11 +728,11 @@ export function DiscoveryService() {
 
                     const result = packet.result;
 
-                    const responseMac = String(
+                    const mac = String(
                         result.mac || ""
                     ).toLowerCase();
 
-                    if (responseMac !== WIZ_EXPECTED_MAC) {
+                    if (mac !== WIZ_EXPECTED_MAC) {
                         service.log(
                             "[WIZ] System configuration MAC mismatch."
                         );
@@ -606,8 +748,6 @@ export function DiscoveryService() {
                         );
                         return;
                     }
-
-                    wizDeviceInfo = result;
 
                     service.log(
                         "[WIZ] System configuration received and validated."
@@ -643,14 +783,12 @@ export function DiscoveryService() {
                 );
             });
 
-            // Socket errors.
             wizDiscoverySocket.on("error", (err) => {
                 service.log(
                     "[WIZ] UDP socket error: " + String(err)
                 );
             });
 
-            // Bind before sending.
             wizDiscoverySocket.bind(WIZ_LOCAL_PORT);
 
             service.log(
@@ -680,17 +818,13 @@ export function DiscoveryService() {
     };
 
 
-    // --------------------------------------------------------
-    // REGISTRATION REQUEST
-    // --------------------------------------------------------
-
+    // Registration request.
     this.CheckForDevices = function() {
         if (!wizDiscoverySocket) {
             service.log("[WIZ] UDP socket unavailable.");
             return;
         }
 
-        // Stop registration retries after verification.
         if (wizRegistrationVerified) {
             return;
         }
@@ -730,10 +864,7 @@ export function DiscoveryService() {
     };
 
 
-    // --------------------------------------------------------
-    // CONTROLLER CREATION
-    // --------------------------------------------------------
-
+    // Controller creation.
     this.CreateController = function(ip, port, data) {
         const mac = String(data.mac || "").toLowerCase();
 
@@ -779,12 +910,8 @@ export function DiscoveryService() {
     };
 
 
-    // --------------------------------------------------------
-    // UPDATE
-    // --------------------------------------------------------
-
+    // Update.
     this.Update = function() {
-        // Announce configured controllers through the original lifecycle.
         for (const cont of service.controllers) {
             if (
                 cont &&
@@ -804,10 +931,7 @@ export function DiscoveryService() {
     };
 
 
-    // --------------------------------------------------------
-    // SHUTDOWN
-    // --------------------------------------------------------
-
+    // Discovery shutdown.
     this.Shutdown = function() {
         if (wizDiscoverySocket) {
             try {
@@ -828,8 +952,7 @@ export function DiscoveryService() {
         }
     };
 
-    this.Removal = function(value) {
-    };
+    this.Removal = function(value) {};
 }
 
 
@@ -847,7 +970,6 @@ class WIZDevice {
         this.ip = value.ip;
         this.port = Number(value.port);
 
-        // Configuration has already been received before creation.
         this.initialized = true;
         this.deviceInfoLoaded = false;
         this.announced = false;
@@ -914,11 +1036,11 @@ class WIZDevice {
             return;
         }
 
-        const dataMac = String(
+        const mac = String(
             data.mac || ""
         ).toLowerCase();
 
-        if (dataMac !== this.mac) {
+        if (mac !== this.mac) {
             service.log(
                 "[WIZ] Controller configuration MAC does not match controller ID."
             );
