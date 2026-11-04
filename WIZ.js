@@ -157,9 +157,9 @@ export function DiscoveryService() {
 
 	this.CheckForDevices = function() {
 
-    service.log("[WIZ] Sending direct registration request...");
+    service.log("[WIZ] Sending direct UDP registration request...");
 
-    const request = JSON.stringify({
+    const request = {
         "method": "registration",
         "params": {
             "phoneMac": "AAAAAAAAAAAA",
@@ -167,7 +167,22 @@ export function DiscoveryService() {
             "phoneIp": "1.2.3.4",
             "id": "1"
         }
-    });
+    };
+
+    try {
+        udp.send(
+            "192.168.0.237",
+            38899,
+            request
+        );
+
+        service.log("[WIZ] UDP send submitted.");
+
+    }
+    catch (err) {
+        service.log("[WIZ] UDP send failed: " + String(err));
+    }
+};
 
     service.broadcast(request, "192.168.0.237");
 
