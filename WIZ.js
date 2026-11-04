@@ -145,7 +145,6 @@ const WIZDeviceLibrary = {
 };
 
 export function DiscoveryService() {
-	this.Initialize = function() {
     this.Initialize = function() {
 
     service.log("[WIZ] UDP runtime inspection.");
