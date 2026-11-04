@@ -191,44 +191,121 @@ export function DiscoveryService() {
 
 	};
 
-	this.Discovered = function(value) {	
+	
+this.Discovered = function(value) {
 
-		const packet = JSON.parse(value.response);
-		switch(packet.method){
-			case `registration`:
-				service.log(packet.result);
-				if(packet.result.success){
-					this.CreateController(value);
-				}
-				break;
-			case `getPilot`:
-				const pController = service.getController(value.id);
-				if (pController !== undefined){
-					pController.updateWithValue(value);
-				}
-				break;
-			case `getSystemConfig`:
-				const result = packet.result;
-				const sController = service.getController(value.id);
-				if (sController !== undefined){
-					service.log("Controller found");
-					sController.setDeviceInfo(result);
-				}
-				else{
-					service.log(`Controller not found ${value.id}`);
-				}
-				break;
-			case `firstBeat`:
-				service.log("First Beat");
-				service.log(packet);
-				break;
+    // Log the complete object supplied by SignalRGB.
+    let diagnosticValue;
 
-			default:
-				service.log(`Unknown methode ${packet.method} response`);
-				break;
-		}		
-		
-	};
+    try {
+        diagnosticValue = JSON.stringify(value);
+    }
+    catch (err) {
+        diagnosticValue = String(value);
+    }
+
+    service.log("[WIZ] Discovery callback received:");
+    service.log(diagnosticValue);
+
+    // Validate the host-provided discovery object.
+    if (!value || typeof value.response !== "string") {
+        service.log("[WIZ] Invalid discovery object or missing response.");
+        return;
+    }
+
+    // Parse incoming JSON safely.
+    let packet;
+
+    try {
+        packet = JSON.parse(value.response);
+    }
+    catch (err) {
+        service.log("[WIZ] Invalid JSON response: " + String(err));
+        return;
+    }
+
+    if (!packet || typeof packet !== "object") {
+        service.log("[WIZ] Invalid packet structure.");
+        return;
+    }
+
+    service.log("[WIZ] Received method: " + String(packet.method));
+
+    switch (packet.method) {
+
+        case "registration":
+
+            // A registration request contains params.
+            // A registration response contains result.
+            if (!packet.result || typeof packet.result !== "object") {
+                service.log(
+                    "[WIZ] Registration packet has no result object. Ignoring."
+                );
+                return;
+            }
+
+            service.log(
+                "[WIZ] Registration result: " +
+                JSON.stringify(packet.result)
+            );
+
+            if (packet.result.success === true) {
+                service.log("[WIZ] Registration successful.");
+                this.CreateController(value);
+            } else {
+                service.log("[WIZ] Registration unsuccessful.");
+            }
+
+            break;
+
+        case "getPilot": {
+
+            const pController = service.getController(value.id);
+
+            if (pController !== undefined) {
+                pController.updateWithValue(value);
+            }
+
+            break;
+        }
+
+        case "getSystemConfig": {
+
+            const result = packet.result;
+            const sController = service.getController(value.id);
+
+            if (!result || typeof result !== "object") {
+                service.log("[WIZ] Invalid system configuration response.");
+                return;
+            }
+
+            if (sController !== undefined) {
+                service.log("[WIZ] Controller found");
+                sController.setDeviceInfo(result);
+            } else {
+                service.log("[WIZ] Controller not found: " + value.id);
+            }
+
+            break;
+        }
+
+        case "firstBeat":
+
+            service.log("[WIZ] First Beat");
+            service.log(JSON.stringify(packet));
+
+            break;
+
+        default:
+
+            service.log(
+                "[WIZ] Unknown response method: " + String(packet.method)
+            );
+
+            break;
+    }
+};
+
 
 	this.Removal = function(value){
 
