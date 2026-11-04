@@ -87,6 +87,7 @@ let wizDiscoverySocket = null;
 const WIZ_PROBE_IP = "192.168.0.237";
 const WIZ_DEVICE_PORT = 38899;
 const WIZ_LOCAL_PORT = 38900;
+const WIZ_EXPECTED_MAC = "9877d5fbb8f4";
 
 /*
 class WIZController {
@@ -221,26 +222,25 @@ const WIZDeviceLibrary = {
 
 
 // ============================================================
-// DISCOVERY SERVICE — SINGLE UDP SOCKET DIAGNOSTIC
+// DISCOVERY SERVICE — SINGLE UDP SOCKET
 // ============================================================
 
 export function DiscoveryService() {
 
     this.IconUrl =
-        "https://play-lh.googleusercontent.com/jhmzIodqBLQQUD2sJF_O6oawa04ocDFfQIgoH0rPOXQY3V1uVz0-FJvEieFjVO-kcJ8=w200-h200-rw";
+        "https://play-lh.googleusercontent.com/jhmjIodqBLQQUD2sJF_O6oawa04ocDFfQIgoH0rPOXQY3V1uVz0-FJvEieFjVO-kcJ8=w200-h200-rw";
 
     this.Initialize = function() {
 
-        service.log(
-            "[WIZ] Initializing single UDP socket..."
-        );
+        service.log("[WIZ] Initializing single UDP socket...");
 
-        // Close an existing socket before reinitialization.
+        // Close any existing socket before reinitialization.
         if (wizDiscoverySocket) {
 
             try {
                 wizDiscoverySocket.close();
             } catch (closeError) {
+
                 service.log(
                     "[WIZ] Previous socket close warning: " +
                     String(closeError)
@@ -261,10 +261,10 @@ export function DiscoveryService() {
                 );
             }
 
-            // Create one socket for sending and receiving.
+            // Create one socket for both sending and receiving.
             wizDiscoverySocket = udp.createSocket();
 
-            // Verify required socket methods.
+            // Verify the required socket methods.
             if (
                 !wizDiscoverySocket ||
                 typeof wizDiscoverySocket.on !== "function" ||
@@ -277,94 +277,131 @@ export function DiscoveryService() {
                 );
             }
 
-            // Register message handler before binding.
-            wizDiscoverySocket.on("message", (data) => {
+            // Register the incoming-message handler before binding.
+            wizDiscoverySocket.on("message", (message) => {
 
-                service.log(
-                    "[WIZ] UDP message received."
-                );
+                service.log("[WIZ] UDP message received.");
 
-                // Inspect JavaScript data type.
-                service.log(
-                    "[WIZ] typeof: " + typeof data
-                );
-
-                // Inspect underlying object type.
-                service.log(
-                    "[WIZ] Object tag: " +
-                    Object.prototype.toString.call(data)
-                );
-
-                // Check whether payload is a regular array.
-                service.log(
-                    "[WIZ] Is array: " +
-                    Array.isArray(data)
-                );
-
-                // Inspect available object properties.
-                let keys = [];
-
-                try {
-
-                    if (
-                        data &&
-                        typeof data === "object"
-                    ) {
-                        keys = Object.keys(data).slice(0, 20);
-                    }
-
-                } catch (err) {
-
-                    service.log(
-                        "[WIZ] Could not inspect object keys."
-                    );
-                }
-
-                service.log(
-                    "[WIZ] Object keys: " +
-                    keys.join(", ")
-                );
-
-                // Inspect the payload without parsing or executing it.
-                let preview = "";
-
-                try {
-
-                    const serialized = JSON.stringify(data);
-
-                    preview = serialized !== undefined
-                        ? serialized
-                        : String(data);
-
-                } catch (err) {
-
-                    preview = String(data);
-                }
-
-                service.log(
-                    "[WIZ] Data preview: " +
-                    preview.slice(0, 600)
-                );
-
-                // Inspect numeric values if the object exposes a length.
+                // Validate the SignalRGB message wrapper.
                 if (
-                    data &&
-                    typeof data === "object" &&
-                    typeof data.length === "number"
+                    !message ||
+                    typeof message !== "object"
                 ) {
+                    service.log(
+                        "[WIZ] Invalid UDP message wrapper ignored."
+                    );
+                    return;
+                }
 
-                    const count = Math.min(data.length, 32);
-                    const bytes = [];
+                // Validate the sender's network address and port.
+                if (
+                    message.address !== WIZ_PROBE_IP ||
+                    Number(message.port) !== WIZ_DEVICE_PORT
+                ) {
+                    service.log(
+                        "[WIZ] Unexpected UDP sender ignored."
+                    );
+                    return;
+                }
 
-                    for (let i = 0; i < count; i++) {
-                        bytes.push(data[i]);
-                    }
+                // SignalRGB's V4ReferenceObject stores the actual
+                // received payload in its .data property.
+                const raw = message.data;
+
+                if (
+                    typeof raw !== "string" ||
+                    raw.length === 0 ||
+                    raw.length > 1024
+                ) {
+                    service.log(
+                        "[WIZ] Invalid UDP payload ignored."
+                    );
+                    return;
+                }
+
+                // Parse the actual WiZ JSON payload.
+                let packet;
+
+                try {
+                    packet = JSON.parse(raw);
+                } catch (parseError) {
 
                     service.log(
-                        "[WIZ] First 32 byte values: " +
-                        bytes.join(", ")
+                        "[WIZ] Invalid JSON response ignored: " +
+                        String(parseError)
                     );
+
+                    return;
                 }
+
+                // Validate the packet structure.
+                if (
+                    !packet ||
+                    typeof packet !== "object" ||
+                    Array.isArray(packet)
+                ) {
+                    service.log(
+                        "[WIZ] Invalid WiZ packet structure ignored."
+                    );
+                    return;
+                }
+
+                // Accept only a successful registration response.
+                if (
+                    packet.method !== "registration" ||
+                    !packet.result ||
+                    typeof packet.result !== "object"
+                ) {
+                    service.log(
+                        "[WIZ] Unexpected WiZ response ignored."
+                    );
+                    return;
+                }
+
+                if (packet.result.success !== true) {
+
+                    service.log(
+                        "[WIZ] Registration unsuccessful."
+                    );
+
+                    return;
+                }
+
+                // Check the reported hardware MAC.
+                const receivedMac = String(
+                    packet.result.mac || ""
+                ).toLowerCase();
+
+                if (receivedMac !== WIZ_EXPECTED_MAC) {
+
+                    service.log(
+                        "[WIZ] Registration response MAC mismatch."
+                    );
+
+                    return;
+                }
+
+                // Successful diagnostic verification.
+                service.log(
+                    "[WIZ] Neo registration response verified."
+                );
+
+                service.log(
+                    "[WIZ] Device IP: " + message.address
+                );
+
+                service.log(
+                    "[WIZ] Device MAC: " + receivedMac
+                );
+
+                service.log(
+                    "[WIZ] Device UDP port: " + message.port
+                );
+
+                // Controller creation intentionally remains disabled.
+                service.log(
+                    "[WIZ] Diagnostic mode: controller creation suppressed."
+                );
 
             });
 
@@ -372,8 +409,7 @@ export function DiscoveryService() {
             wizDiscoverySocket.on("error", (err) => {
 
                 service.log(
-                    "[WIZ] UDP socket error: " +
-                    String(err)
+                    "[WIZ] UDP socket error: " + String(err)
                 );
 
             });
@@ -492,9 +528,7 @@ export function DiscoveryService() {
 
                 wizDiscoverySocket.close();
 
-                service.log(
-                    "[WIZ] UDP socket closed."
-                );
+                service.log("[WIZ] UDP socket closed.");
 
             } catch (err) {
 
