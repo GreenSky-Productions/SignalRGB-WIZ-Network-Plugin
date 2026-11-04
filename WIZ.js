@@ -1,3 +1,4 @@
+import udp from "@SignalRGB/udp";
 export function Name() { return "WIZ Interface"; }
 export function Version() { return "1.0.0"; }
 export function VendorId() { return    0x0; }
@@ -144,10 +145,18 @@ const WIZDeviceLibrary = {
 };
 
 export function DiscoveryService() {
-	this.Initialize = function(){
-		service.log("Initializing Plugin!");
-		service.log("Searching for network devices...");
-	};
+	this.Initialize = function() {
+    service.log("[WIZ] Initializing UDP import test.");
+
+    service.log(
+        "[WIZ] UDP module type: " + typeof udp
+    );
+
+    service.log(
+        "[WIZ] UDP send function type: " +
+        typeof udp.send
+    );
+};
 
 	this.firstRun = true;
 	this.IconUrl = "https://play-lh.googleusercontent.com/jhmzIodqBLQQUD2sJF_O6oawa04ocDFfQIgoH0rPOXQY3V1uVz0-FJvEieFjVO-kcJ8=w200-h200-rw";
