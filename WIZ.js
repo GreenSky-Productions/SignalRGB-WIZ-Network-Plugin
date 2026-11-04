@@ -165,32 +165,9 @@ export function DiscoveryService() {
 	this.UdpListenPort = 38899;
 
 	this.CheckForDevices = function() {
-
-    service.log("[WIZ] Sending direct UDP registration request...");
-
-    const request = {
-        "method": "registration",
-        "params": {
-            "phoneMac": "AAAAAAAAAAAA",
-            "register": false,
-            "phoneIp": "1.2.3.4",
-            "id": "1"
-        }
-    };
-
-    try {
-        udp.send(
-            "192.168.0.237",
-            38899,
-            request
-        );
-
-        service.log("[WIZ] UDP send submitted.");
-
-    }
-    catch (err) {
-        service.log("[WIZ] UDP send failed: " + String(err));
-    }
+    service.log(
+        "[WIZ] Import-only test. UDP transmission disabled."
+    );
 };
 
 	this.Update = function(){
