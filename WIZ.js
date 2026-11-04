@@ -250,11 +250,21 @@ this.Discovered = function(value) {
             );
 
             if (packet.result.success === true) {
-                service.log("[WIZ] Registration successful.");
-                this.CreateController(value);
-            } else {
-                service.log("[WIZ] Registration unsuccessful.");
-            }
+
+    const senderIp = typeof value.ip === "string"
+        ? value.ip
+        : "unknown";
+
+    service.log(
+        "[WIZ] Registration successful from " + senderIp
+    );
+
+    service.log(
+        "[WIZ] Diagnostic mode: controller creation suppressed."
+    );
+
+    return;
+}
 
             break;
 
