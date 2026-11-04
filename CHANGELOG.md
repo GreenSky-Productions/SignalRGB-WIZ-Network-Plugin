@@ -6,7 +6,7 @@ Notable changes to this project are recorded here. This is an engineering change
 
 ### Added
 - Registration and `getSystemConfig` handling for the tested `ESP25_SHRGB_01` WiZ Neo RGB bulb.
-- SignalRGB controller creation and announcement using the device's verified MAC address as its controller identifier.
+- SignalRGB controller creation and announcement using the validated device identity as its controller identifier.
 - A separate UDP control socket in the device component, isolated from the discovery-service socket.
 - `setPilot` RGB/dimming command handling.
 - Continuous SignalRGB frame updates with duplicate-frame suppression and a 100 ms minimum send interval.

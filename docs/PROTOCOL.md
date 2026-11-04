@@ -14,9 +14,9 @@ Observed request shape:
 {
   "method": "registration",
   "params": {
-    "phoneMac": "AAAAAAAAAAAA",
+    "phoneMac": "<client-mac>",
     "register": false,
-    "phoneIp": "1.2.3.4",
+    "phoneIp": "<client-ip>",
     "id": "1"
   }
 }

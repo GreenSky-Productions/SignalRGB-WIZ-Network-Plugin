@@ -22,7 +22,7 @@ Device-specific identifiers and local IP addresses are intentionally omitted fro
 |---|---|---|
 | Registration request/response | SignalRGB log showed registration success and matching device identity | Pass |
 | System configuration | SignalRGB log showed model `ESP25_SHRGB_01`, firmware `1.38.0`, and region `eu` | Pass |
-| Controller creation | Neo appeared in SignalRGB with model, room and IP fields | Pass |
+| Controller creation | Neo appeared in SignalRGB with the expected model and controller metadata | Pass |
 | Device component initialization | Device console logged component initialization and one LED creation | Pass |
 | Control socket bind | Device component bound local UDP port `38901` | Pass |
 | One-shot RGB command | `setPilot` response returned `success: true`; bulb visibly changed to red at 10% dimming | Pass |
