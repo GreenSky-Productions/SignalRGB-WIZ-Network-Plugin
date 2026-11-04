@@ -146,18 +146,35 @@ const WIZDeviceLibrary = {
 
 export function DiscoveryService() {
 	this.Initialize = function() {
-    service.log("[WIZ] Initializing UDP import test.");
+    this.Initialize = function() {
+
+    service.log("[WIZ] UDP runtime inspection.");
 
     service.log(
-        "[WIZ] UDP module type: " + typeof udp
+        "[WIZ] Module type: " + typeof udp
     );
 
     service.log(
-        "[WIZ] UDP send function type: " +
+        "[WIZ] Available module keys: " +
+        Object.keys(udp).join(", ")
+    );
+
+    service.log(
+        "[WIZ] createSocket: " +
+        typeof udp.createSocket
+    );
+
+    service.log(
+        "[WIZ] send: " +
         typeof udp.send
     );
-};
 
+    service.log(
+        "[WIZ] UdpSocketServer: " +
+        typeof UdpSocketServer
+    );
+
+};
 	this.firstRun = true;
 	this.IconUrl = "https://play-lh.googleusercontent.com/jhmzIodqBLQQUD2sJF_O6oawa04ocDFfQIgoH0rPOXQY3V1uVz0-FJvEieFjVO-kcJ8=w200-h200-rw";
 	this.UdpBroadcastPort = 38899;
