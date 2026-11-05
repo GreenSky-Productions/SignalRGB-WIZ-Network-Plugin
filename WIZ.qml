@@ -28,7 +28,7 @@ Item {
             Label{
                 font{
                     pixelSize: 14
-                    family: theme.secondarytextcolor
+                    family: theme.primaryfont
                 }
                 width: parent.width - 20
                 color: theme.secondarytextcolor
@@ -159,24 +159,6 @@ Item {
                                     text: "Firmware Version: " + device.fwVersion
                                 }  
                             }
-
-                            Text{
-                                color: theme.secondarytextcolor
-                                text: `Supports DreamView Protocol: `
-                            }
-
-                            Text{
-                                color: theme.secondarytextcolor
-                                text: ``
-                            }
-
-                            // Text{
-                            //     color: theme.warn
-                            //     width: parent.width
-                            //     visible: false
-                            //     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                            //     text: `This device doesn't support Govee's Razer, or Dreamview protocols. SignalRGB is unable to control it...`
-                            // }
 
                         }
 
