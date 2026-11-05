@@ -1,7 +1,7 @@
 import udp from "@SignalRGB/udp";
 
 export function Name() { return "WIZ Interface"; }
-export function Version() { return "1.2.0"; }
+export function Version() { return "1.2.1"; }
 export function VendorId() { return 0x0; }
 export function ProductId() { return 0x0; }
 export function Type() { return "network"; }
@@ -9,6 +9,14 @@ export function Publisher() { return "GreenSky Productions"; }
 export function Size() { return [1, 1]; }
 export function DefaultPosition() { return [75, 70]; }
 export function DefaultScale() { return 10.0; }
+
+// Image shown in the SignalRGB UI on the device page and in the device list.
+// Requirements: 1024x1024 transparent PNG, artwork inside the central
+// 920x920 area, reachable at a public URL. Without this export SignalRGB
+// shows a generic placeholder. The file is hosted in this repository.
+export function ImageUrl() {
+    return "https://raw.githubusercontent.com/DukeShank/SignalRGB-WIZ-Network-Plugin/main/images/wiz-logo.png";
+}
 
 /* global
 controller:readonly, service:readonly, device:readonly,
