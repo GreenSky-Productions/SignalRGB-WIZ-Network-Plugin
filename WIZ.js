@@ -1,7 +1,7 @@
 import udp from "@SignalRGB/udp";
 
 export function Name() { return "WIZ Interface"; }
-export function Version() { return "1.2.1"; }
+export function Version() { return "1.2.3"; }
 export function VendorId() { return 0x0; }
 export function ProductId() { return 0x0; }
 export function Type() { return "network"; }
@@ -10,12 +10,17 @@ export function Size() { return [1, 1]; }
 export function DefaultPosition() { return [75, 70]; }
 export function DefaultScale() { return 10.0; }
 
+// Logo hosted in this repository. Used for the device image and for the
+// icon of the service tile on SignalRGB's Third Party Services page.
+const WIZ_LOGO_URL =
+    "https://raw.githubusercontent.com/DukeShank/SignalRGB-WIZ-Network-Plugin/main/images/wiz-logo.png";
+
 // Image shown in the SignalRGB UI on the device page and in the device list.
 // Requirements: 1024x1024 transparent PNG, artwork inside the central
 // 920x920 area, reachable at a public URL. Without this export SignalRGB
-// shows a generic placeholder. The file is hosted in this repository.
+// shows a generic placeholder.
 export function ImageUrl() {
-    return "https://raw.githubusercontent.com/DukeShank/SignalRGB-WIZ-Network-Plugin/main/images/wiz-logo.png";
+    return WIZ_LOGO_URL;
 }
 
 /* global
@@ -89,6 +94,20 @@ export function SubdeviceController() {
 }
 
 export function onvariableLedCountChanged() {}
+
+// Called by SignalRGB when the Max Updates Per Second setting changes.
+// The log line shows that the value arrived and what interval it produces.
+export function onMaxUpdatesPerSecondChanged() {
+    const interval = wizGetSendIntervalMs();
+
+    device.log(
+        "[WIZ] Max updates per second set to " +
+        String(MaxUpdatesPerSecond) +
+        (interval === 0
+            ? " (update on every frame)."
+            : " (minimum " + interval + " ms between updates).")
+    );
+}
 
 
 // ============================================================
@@ -781,8 +800,8 @@ const WIZDeviceLibrary = {
 export function DiscoveryService() {
     const discoveryService = this;
 
-    this.IconUrl =
-        "https://play-lh.googleusercontent.com/jhmjIodqBLQQUD2sJF_O6oawa04ocDFfQIgoH0rPOXQY3V1uVz0-FJvEieFjVO-kcJ8=w200-h200-rw";
+    // Icon of the service tile on the Third Party Services page.
+    this.IconUrl = WIZ_LOGO_URL;
 
     this.Initialize = function() {
         service.log(
