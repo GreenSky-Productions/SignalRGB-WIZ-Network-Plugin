@@ -1,91 +1,50 @@
-# SignalRGB WiZ Network Plugin — WiZ Neo integration
+# SignalRGB WiZ Network Plugin — WiZ Neo support
 
-This repository contains a focused, single-maintainer extension of the SignalRGB WiZ Network Plugin. The work documented here is intended to add local-network RGB control for a Philips WiZ Neo bulb that was not working with the existing plugin implementation.
+A small personal extension of the SignalRGB WiZ Network Plugin that lets SignalRGB control a Philips WiZ Neo RGB bulb over the local network.
 
-It is a personal project with a defined scope, not a community-maintained plugin or an ongoing development project.
+## What
 
-> **Project status:** The integration has been verified against one Philips WiZ Neo RGB bulb (`ESP25_SHRGB_01`). Registration, controller creation, continuous RGB updates, brightness control, and the bulb's `setPilot` acknowledgement have been tested successfully. The implementation remains device-specific and is not a general compatibility claim for WiZ products.
+- Finds WiZ bulbs on the local network by UDP broadcast and creates one single-LED SignalRGB device per bulb.
+- Sends SignalRGB colour and brightness to the bulb continuously using the WiZ local `setPilot` command.
+- Follows the bulb if its IP address changes. No IP or MAC address is stored in the code.
 
-## Purpose and maintenance expectations
+## Why
 
-The purpose of this repository is to complete and document the WiZ Neo integration for the original project use case. Once that work is finished, the repository is expected to remain available as-is rather than receive ongoing feature development or community maintenance.
+The existing plugin did not work with my WiZ Neo. This repository contains the fix I needed, shared as-is in case it is useful to someone else.
 
-In practical terms:
+## How
 
-- There is no commitment to maintain compatibility with future SignalRGB, Windows, WiZ firmware, or networking changes.
-- There is no promised issue triage, response time, user support, or pull-request review.
-- Additional device models, protocol features, and feature requests are outside the scope of the project unless the maintainer independently decides to work on them.
-- Issues and pull requests may be left unanswered or unmerged. Do not depend on this repository as a supported product or service.
-- Anyone adapting the code for another device or environment is responsible for testing and maintaining their own changes.
+**Requirements:** SignalRGB with add-on support, and a WiZ bulb on the same 2.4 GHz network as the PC with local control enabled in the WiZ app.
 
-The repository is public for transparency and reuse under its existing license; its public availability should not be interpreted as a commitment to operate a community project.
+**Install:**
+1. In SignalRGB, open the add-on interface and add this repository's URL: `https://github.com/DukeShank/SignalRGB-WIZ-Network-Plugin`.
+2. Select the branch containing this work (currently `test/Register-Neo`).
+3. Install the add-on and restart SignalRGB if prompted.
+4. Turn on **Automatically Start Stream** in the plugin settings, and enable streaming for the bulb's device.
 
-## Verified device and environment
+**How it works:** the plugin broadcasts a registration request to UDP port 38899, confirms each bulb's MAC and model with `getSystemConfig`, then sends `setPilot` (RGB and dimming) to it. Updates are limited to 10 per second. Unchanged colours are re-sent every 2 seconds in case a UDP packet was lost. Scans repeat every 5–60 seconds, which is how address changes are noticed.
 
-| Device identifier | Firmware tested | Verified capability | Status |
-|---|---:|---|---|
-| `ESP25_SHRGB_01` | `1.38.0` | Registration, system configuration, controller registration, RGB colour and dimming via local UDP `setPilot`, continuous SignalRGB frame updates | Verified on one physical device |
+## Status
 
-The test environment used SignalRGB `2.5.84` on Windows 11. This records the environment used for validation; it is not a minimum-version or compatibility guarantee.
+Tested on one bulb: Philips WiZ Neo `ESP25_SHRGB_01`, firmware 1.38.0, SignalRGB 2.5.84, Windows 11. Discovery, device creation, RGB colour, dimming and continuous updates worked.
 
-## What has been verified
+The latest revision (following IP changes, direct probes of known bulbs, the 2-second refresh, the 10% dimming floor, socket re-creation after repeated failures) was only checked in a simulation, not on the bulb.
 
-- The Neo responds to the WiZ registration request.
-- The plugin receives and validates `getSystemConfig`, including the device MAC and model identifier.
-- SignalRGB creates and announces a controller for the device.
-- The device component initializes as a one-LED device.
-- A one-shot red command at 10% dimming was acknowledged by the bulb and visibly applied.
-- Continuous RGB changes from SignalRGB were visibly applied.
-- The stream loop suppresses duplicate frames and currently limits commands to one update every 100 ms (up to 10 updates per second).
+**Known limitations**
+- Only RGB colour and dimming are supported. White temperature, scenes and groups are not.
+- Discovery uses UDP broadcast. It may fail on networks with client isolation or VLANs, or on PCs with several network adapters. There is no manual IP entry.
+- Multiple bulbs, and bulb removal or reconnection, have not been tested.
+- The bulb is not restored to a previous state when SignalRGB shuts down.
+- SignalRGB logs a harmless `DeviceType(): property isn't callable` warning. Its cause is unknown.
 
-These results describe the tested configuration only. See [Testing](docs/TESTING.md), [Architecture](docs/ARCHITECTURE.md), and [Protocol notes](docs/PROTOCOL.md) for implementation details and test limitations.
+## Disclaimer
 
-## Requirements
+This is a personal project with a fixed scope, not a maintained product.
 
-- SignalRGB with support for custom network plugins.
-- A WiZ device on the same local network as the computer running SignalRGB.
-- Local-network control enabled for the device, where required by its WiZ app or configuration.
-- A stable local address for the device while using the current single-device implementation.
+- No support, updates, or compatibility guarantees for future SignalRGB, Windows, or WiZ firmware versions. Issues and pull requests may go unanswered.
+- Only the device above has been tested. Other WiZ models may not work.
+- Use at your own risk. You are responsible for testing any changes you make.
+- Keep traffic on your local network. Do not port-forward the bulb to the internet.
+- Do not post your MAC addresses, IP addresses, or home/room IDs in issues or screenshots.
 
-The tested implementation communicates over the local network. Do not configure router port forwarding or expose the bulb to the public internet for this plugin.
-
-## Installation for development
-
-1. Open SignalRGB's Device Information page.
-2. Use the **Plugins** button to open the custom plugins folder.
-3. Place the plugin's `.js` and corresponding `.qml` files in the appropriate custom plugin location.
-4. Restart SignalRGB so it reloads the plugin.
-5. Open the WIZ interface/device in SignalRGB and inspect its console logs.
-
-SignalRGB's instructions for overriding a plugin are available at <https://docs.signalrgb.com/troubleshooting/advanced-troubleshooting/replacing-plugin/>.
-
-## Current implementation notes
-
-The current development implementation includes an **Automatically Start Stream** setting. Enable it, and also enable streaming for the Neo device in SignalRGB. The setting gates the `Render()` loop; enabling only the device's stream toggle is not sufficient in the tested implementation.
-
-The current implementation is pinned to one test device. Before using it with another device, the temporary target configuration in `WIZ.js` must be replaced with a proper discovery and configuration mechanism. Do not publish a copy containing a personal device's MAC address or private IP address.
-
-## Known limitations
-
-- Single-device test target; IP address and MAC are pinned in the development code.
-- General broadcast/multicast discovery has not been implemented or validated for this Neo.
-- Multi-device operation, duplicate-device handling, and device removal/reconnection have not been validated.
-- Only RGB colour and dimming have been verified. White colour temperature, tunable-white behaviour, scenes, and groups are not verified.
-- The initial streaming cap is 10 updates per second. Smoothness and latency have not been benchmarked systematically.
-- Shutdown restoration or returning the bulb to an independent control mode has not been verified.
-- SignalRGB logs a non-blocking `DeviceType(): property isn't callable. Expected Function.` warning. The device still initializes and controls the bulb, but the warning's cause has not yet been established.
-
-## Repository workflow
-
-See [Branching and release workflow](BRANCHING.md). During the remaining work, keep only `main` and `test/Register-Neo`. Once the implementation and documentation are complete, merge the tested branch into `main` and delete the development branch. Do not retain an archive of one-off diagnostic branches.
-
-## Security and privacy
-
-- Keep WiZ traffic on the trusted local network.
-- Do not add router port-forwarding rules for the device.
-- Treat MAC addresses, private IP addresses, home IDs, and room IDs as local device/network identifiers. Use placeholders in issues, screenshots, and public documentation.
-- A MAC address is an identifier, not cryptographic authentication. Source-IP/port checks and MAC comparisons help reject unrelated packets but do not provide cryptographic device authentication.
-
-## License and attribution
-
-Retain the repository's existing `LICENSE` and upstream attribution. Do not change licensing terms without confirming the original source's license and the project's rights to modify and redistribute the code.
+Keep the repository's `LICENSE` and the upstream attribution when reusing the code.
