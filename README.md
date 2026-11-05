@@ -22,13 +22,13 @@ The existing plugin did not work with my WiZ Neo. This repository contains the f
 3. Install the add-on and restart SignalRGB if prompted.
 4. Turn on **Automatically Start Stream** in the plugin settings, and enable streaming for the bulb's device.
 
-**How it works:** the plugin broadcasts a registration request to UDP port 38899, confirms each bulb's MAC and model with `getSystemConfig`, then sends `setPilot` (RGB and dimming) to it. Updates are limited to 10 per second. Unchanged colours are re-sent every 2 seconds in case a UDP packet was lost. Scans repeat every 5–60 seconds, which is how address changes are noticed.
+**How it works:** the plugin broadcasts a registration request to UDP port 38899, confirms each bulb's MAC and model with `getSystemConfig`, then sends `setPilot` (RGB and dimming) to it. The send rate is set by **Max Updates Per Second** in the plugin settings (default 10, range 1–30). It can be changed while streaming. SignalRGB renders about 30 frames per second, so 30 sends every frame, and other values are rounded to a multiple of the frame period. Unchanged colours are re-sent every 2 seconds in case a UDP packet was lost. Scans repeat every 5–60 seconds, which is how address changes are noticed.
 
 ## Status
 
 Tested on one bulb: Philips WiZ Neo `ESP25_SHRGB_01`, firmware 1.38.0, SignalRGB 2.5.84, Windows 11. Discovery, device creation, RGB colour, dimming and continuous updates worked.
 
-The latest revision (following IP changes, direct probes of known bulbs, the 2-second refresh, the 10% dimming floor, socket re-creation after repeated failures) was only checked in a simulation, not on the bulb.
+The latest revision (following IP changes, direct probes of known bulbs, the 2-second refresh, the 10% dimming floor, socket re-creation after repeated failures, the Max Updates Per Second setting) was only checked in a simulation, not on the bulb.
 
 **Known limitations**
 - Only RGB colour and dimming are supported. White temperature, scenes and groups are not.
@@ -44,6 +44,7 @@ This is a personal project with a fixed scope, not a maintained product.
 - No support, updates, or compatibility guarantees for future SignalRGB, Windows, or WiZ firmware versions. Issues and pull requests may go unanswered.
 - Only the device above has been tested. Other WiZ models may not work.
 - Use at your own risk. You are responsible for testing any changes you make.
+- WiZ is a trademark of Signify Holding. This project is not affiliated with or endorsed by Signify or SignalRGB. The logo is used only to identify the device.
 - Keep traffic on your local network. Do not port-forward the bulb to the internet.
 - Do not post your MAC addresses, IP addresses, or home/room IDs in issues or screenshots.
 
