@@ -1,7 +1,7 @@
 import udp from "@SignalRGB/udp";
 
 export function Name() { return "WIZ Interface"; }
-export function Version() { return "1.1.0"; }
+export function Version() { return "1.2.0"; }
 export function VendorId() { return 0x0; }
 export function ProductId() { return 0x0; }
 export function Type() { return "network"; }
@@ -12,7 +12,7 @@ export function DefaultScale() { return 10.0; }
 
 /* global
 controller:readonly, service:readonly, device:readonly,
-AutoStartStream:readonly, forcedColor:readonly, forceColor:readonly,
+AutoStartStream:readonly, MaxUpdatesPerSecond:readonly, forcedColor:readonly, forceColor:readonly,
 dimmColor:readonly, minBrightniss:readonly,
 TurnOffOnShutdown:readonly, variableLedCount:readonly
 */
@@ -25,6 +25,15 @@ export function ControllableParameters() {
             label: "Automatically Start Stream",
             type: "boolean",
             default: "false"
+        },
+        {
+            property: "MaxUpdatesPerSecond",
+            group: "settings",
+            label: "Max Updates Per Second",
+            min: "1",
+            max: "30",
+            type: "number",
+            default: "10"
         },
         {
             property: "forcedColor",
@@ -106,7 +115,16 @@ const WIZ_PENDING_TIMEOUT_MS = 10000;
 const WIZ_STALE_AFTER_MS = 180000;
 
 // Streaming configuration.
-const WIZ_MIN_SEND_INTERVAL_MS = 100;
+// The send rate is a user setting (MaxUpdatesPerSecond) and can be changed
+// while streaming. SignalRGB calls Render() about 30 times per second, so
+// values above 30 have no effect, and the effective rate is a multiple of
+// the frame period (about 30, 15, 10, 7.5, 6 updates per second).
+const WIZ_DEFAULT_MAX_UPDATES_PER_SECOND = 10;
+const WIZ_MAX_UPDATES_PER_SECOND = 30;
+// Frames arrive about every 32 ms with some jitter. Without a tolerance, a
+// frame arriving at 99 ms would be skipped for a 100 ms interval, and the
+// next one sent at about 130 ms, lowering the real rate by a quarter.
+const WIZ_SEND_INTERVAL_TOLERANCE_MS = 10;
 // UDP has no delivery guarantee. An unchanged frame is re-sent at this
 // interval so a single lost packet does not leave the bulb on a stale colour.
 const WIZ_REFRESH_INTERVAL_MS = 2000;
@@ -115,6 +133,24 @@ const WIZ_COMMAND_SPEED = 100;
 const WIZ_MIN_DIMMING = 10;
 // Consecutive failed writes before the control socket is re-created.
 const WIZ_MAX_SEND_FAILURES = 20;
+
+// Fixed request payloads, built once instead of on every scan.
+// The registration fields are protocol placeholders, not host/device
+// identifiers.
+const WIZ_REGISTRATION_REQUEST = JSON.stringify({
+    method: "registration",
+    params: {
+        phoneMac: "AAAAAAAAAAAA",
+        register: false,
+        phoneIp: "1.2.3.4",
+        id: "1"
+    }
+});
+
+const WIZ_SYSTEM_CONFIG_REQUEST = JSON.stringify({
+    method: "getSystemConfig",
+    id: 1
+});
 
 
 // ============================================================
@@ -137,6 +173,13 @@ let wizControlAckLogged = false;
 let wizControlErrorLogged = false;
 let wizRenderStartLogged = false;
 
+// Parsed colour arrays for the Forced Color and dimmed-colour settings,
+// keyed by the setting's string value. Re-parsed only when it changes.
+let wizColorCache = {
+    forced: { key: null, value: null },
+    dimmed: { key: null, value: null }
+};
+
 
 // ============================================================
 // VALIDATION AND FRAME HELPERS
@@ -154,6 +197,30 @@ function wizClamp(value, min, max) {
     }
 
     return Math.min(max, Math.max(min, Math.round(number)));
+}
+
+// Minimum time between sent frames, derived from the MaxUpdatesPerSecond
+// setting. Read on every Render() call so a change applies immediately.
+// The top of the range means "every frame", with no limit.
+function wizGetSendIntervalMs() {
+    const rate = typeof MaxUpdatesPerSecond === "undefined"
+        ? WIZ_DEFAULT_MAX_UPDATES_PER_SECOND
+        : Number(MaxUpdatesPerSecond);
+
+    if (!Number.isFinite(rate)) {
+        return Math.round(1000 / WIZ_DEFAULT_MAX_UPDATES_PER_SECOND);
+    }
+
+    const clamped = Math.min(
+        WIZ_MAX_UPDATES_PER_SECOND,
+        Math.max(1, rate)
+    );
+
+    if (clamped >= WIZ_MAX_UPDATES_PER_SECOND) {
+        return 0;
+    }
+
+    return Math.round(1000 / clamped);
 }
 
 function wizValueOrZero(value) {
@@ -262,9 +329,31 @@ function wizFramesEqual(a, b) {
         a.speed === b.speed;
 }
 
+function wizResetColorCache() {
+    wizColorCache = {
+        forced: { key: null, value: null },
+        dimmed: { key: null, value: null }
+    };
+}
+
+// Returns device.createColorArray(setting, 1, "Inline"), parsing the
+// setting only when its value differs from the cached one. A result that
+// is not a valid colour array is not cached.
+function wizGetCachedColor(slot, setting) {
+    const key = String(setting);
+    const entry = wizColorCache[slot];
+
+    if (entry.key !== key || !entry.value) {
+        entry.value = device.createColorArray(setting, 1, "Inline");
+        entry.key = key;
+    }
+
+    return entry.value;
+}
+
 function wizGetCurrentFrame() {
     const color = wizIsEnabled(forceColor)
-        ? device.createColorArray(forcedColor, 1, "Inline")
+        ? wizGetCachedColor("forced", forcedColor)
         : device.color(0, 0);
 
     if (!Array.isArray(color) || color.length < 3) {
@@ -278,7 +367,7 @@ function wizGetCurrentFrame() {
     // Preserve the original plugin's black-pixel behaviour.
     if (r === 0 && g === 0 && b === 0) {
         return wizMakeFrame(
-            device.createColorArray(dimmColor, 1, "Inline"),
+            wizGetCachedColor("dimmed", dimmColor),
             wizClamp(minBrightniss, WIZ_MIN_DIMMING, 100)
         );
     }
@@ -336,6 +425,12 @@ function wizOpenControlSocket(mac) {
         }
 
         wizControlSocket.on("message", (message) => {
+            // The only use of a reply is the one-time acknowledgement log
+            // below, so skip all parsing once that has happened.
+            if (wizControlAckLogged) {
+                return;
+            }
+
             // The controller endpoint is read on every packet, so a
             // changed device address is followed without re-binding.
             if (
@@ -453,14 +548,9 @@ function wizSendFrame(frame) {
             Number(controller.port)
         );
 
-        // Explicit assignments: no object spread syntax.
-        wizLastSentFrame = {
-            r: frame.r,
-            g: frame.g,
-            b: frame.b,
-            dimming: frame.dimming,
-            speed: frame.speed
-        };
+        // Frames are created fresh by wizMakeFrame() and are never modified
+        // after sending, so the object can be kept without copying.
+        wizLastSentFrame = frame;
 
         wizLastSendTime = Date.now();
         wizControlErrorLogged = false;
@@ -496,6 +586,7 @@ function wizSendFrame(frame) {
 
 export function Initialize() {
     device.addFeature("udp");
+    wizResetColorCache();
 
     const componentName = controller.wiztype
         ? controller.wiztype.productName
@@ -585,15 +676,17 @@ export function Render() {
         wizRenderStartLogged = true;
     }
 
-    const frame = wizGetCurrentFrame();
+    // Check the send interval first: most Render() calls (about 30 per
+    // second) are skipped here, before any colour handling.
+    const elapsed = Date.now() - wizLastSendTime;
 
-    if (!frame) {
+    if (elapsed + WIZ_SEND_INTERVAL_TOLERANCE_MS < wizGetSendIntervalMs()) {
         return;
     }
 
-    const elapsed = Date.now() - wizLastSendTime;
+    const frame = wizGetCurrentFrame();
 
-    if (elapsed < WIZ_MIN_SEND_INTERVAL_MS) {
+    if (!frame) {
         return;
     }
 
@@ -614,6 +707,8 @@ export function Render() {
 // ============================================================
 
 export function Shutdown(suspend) {
+    wizResetColorCache();
+
     if (wizControlSocket) {
         wizCloseControlSocket();
         device.log(
@@ -818,10 +913,7 @@ export function DiscoveryService() {
                         time: Date.now()
                     };
 
-                    const request = JSON.stringify({
-                        method: "getSystemConfig",
-                        id: 1
-                    });
+                    const request = WIZ_SYSTEM_CONFIG_REQUEST;
 
                     try {
                         wizDiscoverySocket.write(
@@ -973,16 +1065,7 @@ export function DiscoveryService() {
             }
         }
 
-        // These fields are protocol placeholders, not host/device identifiers.
-        const request = JSON.stringify({
-            method: "registration",
-            params: {
-                phoneMac: "AAAAAAAAAAAA",
-                register: false,
-                phoneIp: "1.2.3.4",
-                id: "1"
-            }
-        });
+        const request = WIZ_REGISTRATION_REQUEST;
 
         wizScanResponders = {};
         wizScanCount++;
@@ -1281,4 +1364,3 @@ class WIZDevice {
         }
     }
 }
- 
