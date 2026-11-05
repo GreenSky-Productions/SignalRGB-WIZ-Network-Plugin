@@ -4,9 +4,10 @@ A small personal extension of the SignalRGB WiZ Network Plugin that lets SignalR
 
 ## What
 
-- Finds WiZ bulbs on the local network by UDP broadcast and creates one single-LED SignalRGB device per bulb.
-- Sends SignalRGB colour and brightness to the bulb continuously using the WiZ local `setPilot` command.
-- Follows the bulb if its IP address changes. No IP or MAC address is stored in the code.
+- Discovers WiZ devices on the local network using UDP broadcast, validates their identity and creates one single-LED SignalRGB device per discovered controller.
+- Sends SignalRGB RGB colour and brightness to each device using the WiZ local `setPilot` command. Each device is represented by one logical LED.
+- Also probes previously discovered devices directly and updates their IP address when a later discovery scan finds them at a new address. No individual IP or MAC address is stored in the code.
+- The plugin's service panel shows the search indicator when no controllers have been found, then lists each discovered device's model, ID (MAC), room ID, IP address and firmware version.
 
 ## Why
 
@@ -14,7 +15,7 @@ The existing plugin did not work with my WiZ Neo. This repository contains the f
 
 ## How
 
-**Requirements:** SignalRGB with add-on support, and a WiZ bulb on the same 2.4 GHz network as the PC with local control enabled in the WiZ app.
+**Requirements:** SignalRGB with add-on support, and a WiZ bulb on the same 2.4 GHz network as the PC with local control enabled in the WiZ app. Local UDP communication must be allowed on the network.
 
 **Install:**
 1. In SignalRGB, open the add-on interface and add this repository's URL: `https://github.com/DukeShank/SignalRGB-WIZ-Network-Plugin`.
@@ -22,20 +23,33 @@ The existing plugin did not work with my WiZ Neo. This repository contains the f
 3. Install the add-on and restart SignalRGB if prompted.
 4. Turn on **Automatically Start Stream** in the plugin settings, and enable streaming for the bulb's device.
 
-**How it works:** the plugin broadcasts a registration request to UDP port 38899, confirms each bulb's MAC and model with `getSystemConfig`, then sends `setPilot` (RGB and dimming) to it. The send rate is set by **Max Updates Per Second** in the plugin settings (default 10, range 1–30). It can be changed while streaming. SignalRGB renders about 30 frames per second, so 30 sends every frame, and other values are rounded to a multiple of the frame period. Unchanged colours are re-sent every 2 seconds in case a UDP packet was lost. Scans repeat every 5–60 seconds, which is how address changes are noticed.
+**How it works:** the plugin broadcasts a registration request to UDP port 38899, validates the responding device's MAC address, then requests its model and firmware information with `getSystemConfig`. Each scan also sends direct probes to the last known IP addresses of discovered devices. The first five scans run at approximately 5-second intervals; after that, scans repeat every 15 seconds while no devices are known, or every 60 seconds once at least one controller has been discovered. This is how address changes and device availability are detected.
+
+The device component sends RGB colour and dimming through `setPilot`. **Max Updates Per Second** defaults to 10 and can be set from 1 to 30 while streaming. It acts as a transmission-rate limit checked on SignalRGB's approximately 30 FPS render calls. A value of 30 removes the interval limit, allowing changed frames to be sent on every available render call; lower settings limit how often frames are sent. The actual rate depends on the render cadence. Unchanged frames are suppressed, then re-sent every 2 seconds in case a UDP packet was lost. Brightness is clamped to 10–100%; an incoming black frame uses the configured dimmed colour and minimum brightness instead.
+
+**Settings:**
+- **Automatically Start Stream** (default off): enables continuous frame streaming.
+- **Max Updates Per Second** (default 10, range 1–30): limits the frame transmission rate.
+- **Force Color** (default off): uses **Forced Color** instead of the colour supplied by SignalRGB.
+- **Forced Color** (default `#009bde`): colour used when **Force Color** is enabled.
+- **Default Color when dimmed** (default `#010101`): colour substituted when the incoming SignalRGB frame is black.
+- **Minimal Brightness** (default 10%, range 10–100%): brightness used with the dimmed colour. The current SignalRGB setting label is misspelled as “Minimal Brightniss”.
 
 ## Status
 
 Tested on one bulb: Philips WiZ Neo `ESP25_SHRGB_01`, firmware 1.38.0, SignalRGB 2.5.84, Windows 11. Discovery, device creation, RGB colour, dimming and continuous updates worked.
 
-The latest revision (following IP changes, direct probes of known bulbs, the 2-second refresh, the 10% dimming floor, socket re-creation after repeated failures, the Max Updates Per Second setting) was only checked in a simulation, not on the bulb.
+The current plugin version is 1.2.3. The device library also contains mappings for `ESP03_SHRGB3_01ABI` (WRGB LED Strip) and `127372` (W100 WRGB Light Bulb). These are model mappings only; they have not been tested here. Other models may be discovered and announced generically, but that does not establish compatibility.
+
+The current revision includes IP-change handling, direct probes of known devices, the 2-second refresh, the 10% dimming floor, control-socket re-creation after repeated write failures and the **Max Updates Per Second** setting.
 
 **Known limitations**
-- Only RGB colour and dimming are supported. White temperature, scenes and groups are not.
-- Discovery uses UDP broadcast. It may fail on networks with client isolation or VLANs, or on PCs with several network adapters. There is no manual IP entry.
-- Multiple bulbs, and bulb removal or reconnection, have not been tested.
-- The bulb is not restored to a previous state when SignalRGB shuts down.
-- SignalRGB logs a harmless `DeviceType(): property isn't callable` warning. Its cause is unknown.
+- Only RGB colour and dimming are sent. White temperature, scenes and groups are not supported by the current control path.
+- Discovery starts with UDP broadcast and also probes known IP addresses directly. It may fail on networks with client isolation or VLANs, or on PCs with several network adapters. There is no manual IP entry.
+- A device that has not answered discovery for 3 minutes is marked stale and logged, but it is not automatically removed from the controller list. The service panel does not show a separate online/offline indicator.
+- Multiple bulbs, and device removal or reconnection, have not been tested.
+- The bulb is not restored to a previous state when SignalRGB shuts down; the plugin does not send a restore or off command.
+- SignalRGB may log `DeviceType(): property isn't callable`. Its cause and impact are unknown.
 
 ## Disclaimer
 
